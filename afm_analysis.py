@@ -30,10 +30,12 @@ class AFM():
                     if line[0] != '#':
                         break
 
+            self.dx = self.xdim / (self.shape[0] - 1)
+            self.dy = self.ydim / (self.shape[1] - 1)
             #x = np.linspace(0, xdim, zdata.shape[0])
             #y = np.linspace(0, ydim, zdata.shape[1])
             self.X, self.Y = np.mgrid[0:self.xdim:1j*self.shape[0], 
-            0:self.ydim:1j*self.shape[1]]
+                                      0:self.ydim:1j*self.shape[1]]
             
         except IOError:
             print(txtfile + ' does not exist')
@@ -46,12 +48,13 @@ class AFM():
                        np.linspace(sy, ey, Npoints)]
         
         if method == 'gd':
-            return griddata(c_[self.X.ravel(), self.Y.ravel()], self.Z.ravel(), 
-                            (points[:,0], points[:,1]), *args, **kwargs)
+            return points, griddata(c_[self.X.ravel(), self.Y.ravel()], 
+                                    self.Z.ravel(), 
+                                    (points[:,0], points[:,1]), *args, **kwargs)
         elif method == 'rbs':
             spline = RectBivariateSpline(self.X[:,0], self.Y[0], self.Z, 
                                          *args, **kwargs)
-            return spline.ev(points[:,0], points[:,1])
+            return points, spline.ev(points[:,0], points[:,1])
 
     def subtract_plane(self, margins=0):
         """Subtract a plane fit through the data. Store result
@@ -135,12 +138,63 @@ class AFM():
 
 
 class AFMhole(AFM):
-    def find_minimum(self):
-        pass
+    def __init__(self, txtfile):
+        AFM.__init__(self, txtfile)
+        self.set_minpos()
+
+    def set_minpos(self, margins=0):
+        self.minval = self.crop_rect_ratio(margins)[2].min()
+        self.minpos = np.array(np.where(self.Z==self.minval)).ravel()
         
     def profiles_around_min(self, angle=0, span=5, margins=0):
         """
         """
-        minx, miny = map(int, where(d.Z==d.crop_rect_ratio(margins)[2].min()))
-        
+        profile_centers = self.minpos + [[i*np.sin(angle), -i*np.cos(angle)] 
+                                         for i in range(-span, span+1)]
 
+        # need to figure out how to remove div-by-zero error here
+        # radius = min(self.minpos[0] / np.cos(angle),
+        #              self.minpos[1] / np.sin(angle),
+        #              (self.shape[0] - self.minpos[0]) / np.cos(angle),
+        #              (self.shape[1] - self.minpos[1]) / np.sin(angle))
+        radius = min(self.minpos[0], self.shape[0] - self.minpos[0],
+                     self.minpos[1], self.shape[1] - self.minpos[1])
+        radius -= max(span * np.cos(angle), span * np.sin(angle))
+        ss = profile_centers - [np.cos(angle) * radius, np.sin(angle) * radius]
+        ee = profile_centers + [np.cos(angle) * radius, np.sin(angle) * radius]
+
+        profiles = [self.interpolate_profile(ss[i], ee[i]) 
+                    for i in range(len(ss))]
+
+        ddiag = np.sqrt((np.cos(angle) * self.dx)**2 + 
+                        (np.sin(angle) * self.dy)**2)
+        xvals = np.linspace(-radius * ddiag, radius * ddiag, len(profiles[0][1]))
+        # halflength = min(self.shape)/2
+        # co = [c + np.arange(-halflength, halflength+1)[:,np.newaxis]
+        #       * [np.cos(angle), np.sin(angle)] for c in profile_centers]
+        # co = np.array(co)
+        # inside = np.all((co[:,:,0] >= 0) & (co[:,:,0] <= self.shape[0]-1) &
+        #                 (co[:,:,1] >= 0) & (co[:,:,1] <= self.shape[1]-1), 0)
+        # co = co[:, inside]
+
+        return [Profile(xvals, p[1], p[0]) for p in profiles]
+
+    def profile_polyfit():
+        pass
+
+
+class Profile():
+    def __init__(self, x, y, coords):
+        self.x = x
+        self.y = y
+        self.coords = coords
+
+    def fit_poly(self, degree=10):
+        # fit a degree-order polynomial to the profile
+        self._poly = np.polyfit(self.x, self.y, degree)
+        self.poly = np.polyval(self._poly, self.x)
+        # calculate first and second derivatives
+        self._poly_d = np.arange(degree, 0, -1) * self._poly[:-1]
+        self._poly_d2 = np.arange(degree-1, 0, -1) * self._poly_d[:-1]
+        self.ROC = ((1  + np.polyval(self._poly_d, self.x)**2)**(3/2) 
+                    / np.polyval(self._poly_d2, self.x))
