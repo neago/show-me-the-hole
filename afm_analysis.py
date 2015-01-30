@@ -179,9 +179,6 @@ class AFMhole(AFM):
 
         return [Profile(xvals, p[1], p[0]) for p in profiles]
 
-    def profile_polyfit():
-        pass
-
 
 class Profile():
     def __init__(self, x, y, coords):
@@ -198,3 +195,16 @@ class Profile():
         self._poly_d2 = np.arange(degree-1, 0, -1) * self._poly_d[:-1]
         self.ROC = ((1  + np.polyval(self._poly_d, self.x)**2)**(3/2) 
                     / np.polyval(self._poly_d2, self.x))
+
+        # calculate diameter of hole as distance between turning points
+        # (where ROC goes from positive to negative)
+        neg_curv = np.where(self.ROC < 0)[0]
+        ip = np.searchsorted(neg_curv, len(self.y)/2)
+        self.inflections = [neg_curv[ip-1], neg_curv[ip]]
+        self.diameter = (self.x[self.inflections[1] - 1] - 
+                         self.x[self.inflections[0]])
+
+        self.ROCmin = self.ROC[self.inflections[0]+1:self.inflections[1]].min()
+
+        # very simple depth measure
+        self.depth = self.y.max() - self.y.min()
