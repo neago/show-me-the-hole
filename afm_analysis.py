@@ -12,6 +12,7 @@ class AFM():
     def __init__(self, txtfile=None):
         if txtfile:
             self.load_txtfile(txtfile)
+            self.filename = txtfile
 
     def load_txtfile(self, txtfile):
         try:
@@ -134,7 +135,15 @@ class AFM():
         #             (self.Y < self.ydim * (1-margins[3])))
         
         # return self.X[cropmask], self.Y[cropmask], self.Z[cropmask]
-        return map(crop, (self.X, self.Y, self.Z))
+        return (crop(self.X), crop(self.Y), crop(self.Z))
+
+    def show(self, attr='Z', vrange=[None, None], profiles=[]):
+        vmin = vrange[0] if vrange[0] is not None else getattr(self, attr).min()
+        vmax = vrange[1] if vrange[1] is not None else getattr(self, attr).max()
+        plt.imshow(getattr(self, attr).T, cmap=plt.cm.GnBu_r, 
+                   interpolation='nearest', origin='lower',
+                   extent=[0, self.xdim, 0, self.ydim], vmin=vmin, vmax=vmax)
+        plt.colorbar()
 
 
 class AFMhole(AFM):
@@ -178,6 +187,38 @@ class AFMhole(AFM):
         # co = co[:, inside]
 
         return [Profile(xvals, p[1], p[0]) for p in profiles]
+
+    def profile_analysis(self, margins=.2, degree=10, angles=36):
+        self.set_minpos(margins)
+        self.angles = np.linspace(0, np.pi, angles+1, endpoint=True)
+        self.profs = [self.profiles_around_min(a, 0)[0] for a in self.angles]
+        for p in self.profs:
+            p.fit_poly(degree)
+
+        self.ROCmins = [p.ROCmin for p in self.profs]
+        self.diameters = [p.diameter for p in self.profs]
+        self.major = np.argmax(self.ROCmins)
+        self.minor = np.argmin(self.ROCmins)
+        # first and last profile are the same, so skip one for averages
+        self.ROCmean = np.mean(self.ROCmins[:-1])
+        self.ROCaspect = max(self.ROCmins) / min(self.ROCmins)
+        self.diam_mean = np.mean(self.diameters[:-1])
+        self.diam_aspect = max(self.diameters) / min(self.diameters)
+        self.depth = self.Z.max() - self.minval
+        
+        #print(ROCmean, ROCaspect, diam_mean, diam_aspect, depth)
+
+    def print_data(self):
+        print(self.filename)
+        print('-' * len(self.filename))
+        print('ROC: {:.1f} µm - {:.1f} µm; mean {:.1f}'.format(min(self.ROCmins),
+                                                            max(self.ROCmins),
+                                                            self.ROCmean))
+        print('diameter: {:.1f} µm - {:.1f} µm; mean {:.1f}'.format(
+                min(self.diameters), max(self.diameters), self.diam_mean))
+        print('aspect ratio: {:.2f} (diam) / {:.2f} (ROC)'.format(
+                self.diam_aspect, self.ROCaspect))
+        print('depth: {:.2f} µm'.format(self.depth))
 
 
 class Profile():
